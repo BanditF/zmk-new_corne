@@ -115,15 +115,15 @@ fn grant_folder(dir: &Path, sid: &ContainerSid) -> std::io::Result<()> {
     Ok(())
 }
 
-/// A pipe whose `child` end is inheritable and whose `parent` end isn't.
+/// A pipe, neither end inheritable yet: the child's end becomes so only for the moment the
+/// process is created, and only that process gets it (the handle list).
 fn pipe(child_reads: bool) -> std::io::Result<(HANDLE, File)> {
-    let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: std::ptr::null_mut(), bInheritHandle: 1 };
+    let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: std::ptr::null_mut(), bInheritHandle: 0 };
     let (mut read, mut write): (HANDLE, HANDLE) = (std::ptr::null_mut(), std::ptr::null_mut());
     if unsafe { CreatePipe(&mut read, &mut write, &sa, 0) } == 0 {
         return Err(os_err());
     }
     let (child, parent) = if child_reads { (read, write) } else { (write, read) };
-    unsafe { SetHandleInformation(parent, HANDLE_FLAG_INHERIT, 0) };
     Ok((child, unsafe { File::from_raw_handle(parent as _) }))
 }
 
@@ -137,10 +137,16 @@ pub struct Contained {
 
 unsafe impl Send for Contained {}
 
-/// Starts `program args` from `dir` in the plugin's AppContainer, suspended.
-pub fn spawn(id: &str, dir: &Path, run: &[String], log: File) -> std::io::Result<Contained> {
-    let sid = ContainerSid::for_plugin(id)?;
-    grant_folder(dir, &sid)?;
+/// Starts `program args` from `dir`, suspended: in the plugin's AppContainer when `contained`.
+/// Either way the process inherits only its own pipe ends and log.
+pub fn spawn(id: &str, dir: &Path, run: &[String], log: File, contained: bool) -> std::io::Result<Contained> {
+    let sid = if contained {
+        let sid = ContainerSid::for_plugin(id)?;
+        grant_folder(dir, &sid)?;
+        Some(sid)
+    } else {
+        None
+    };
     let program = dir.join(run.first().ok_or_else(|| std::io::Error::other("the manifest's run is empty"))?);
     let mut cmdline = format!("\"{}\"", program.display());
     for a in &run[1..] {
@@ -150,20 +156,23 @@ pub fn spawn(id: &str, dir: &Path, run: &[String], log: File) -> std::io::Result
     let (child_in, stdin) = pipe(true)?;
     let (child_out, stdout) = pipe(false)?;
     let child_err = log.as_raw_handle() as HANDLE;
-    unsafe { SetHandleInformation(child_err, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
     let inherit = [child_in, child_out, child_err];
+    for h in inherit {
+        unsafe { SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
+    }
+    let attributes = if sid.is_some() { 2 } else { 1 };
 
     unsafe {
         let mut size = 0usize;
-        InitializeProcThreadAttributeList(std::ptr::null_mut(), 2, 0, &mut size);
+        InitializeProcThreadAttributeList(std::ptr::null_mut(), attributes, 0, &mut size);
         let mut buf = vec![0u8; size];
         let attrs = buf.as_mut_ptr() as LPPROC_THREAD_ATTRIBUTE_LIST;
-        if InitializeProcThreadAttributeList(attrs, 2, 0, &mut size) == 0 {
+        if InitializeProcThreadAttributeList(attrs, attributes, 0, &mut size) == 0 {
             return Err(os_err());
         }
-        let caps = SECURITY_CAPABILITIES { AppContainerSid: sid.0, Capabilities: std::ptr::null_mut(), CapabilityCount: 0, Reserved: 0 };
-        let ok = UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize, &caps as *const _ as *const _, std::mem::size_of::<SECURITY_CAPABILITIES>(), std::ptr::null_mut(), std::ptr::null())
-            != 0
+        let caps = sid.as_ref().map(|sid| SECURITY_CAPABILITIES { AppContainerSid: sid.0, Capabilities: std::ptr::null_mut(), CapabilityCount: 0, Reserved: 0 });
+        let ok = caps.as_ref().is_none_or(|caps| UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize, caps as *const _ as *const _, std::mem::size_of::<SECURITY_CAPABILITIES>(), std::ptr::null_mut(), std::ptr::null())
+            != 0)
             && UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize, inherit.as_ptr() as *const _, std::mem::size_of_val(&inherit), std::ptr::null_mut(), std::ptr::null()) != 0;
         if !ok {
             let e = os_err();
