@@ -59,6 +59,12 @@ GLYPHS = {
     "org.foxglove.signalrgb": [
         ("rgb", '<polyline points="2,12 6,12 8.5,6 11.5,18 14.5,5 17,16 19,12 22,12"/>'),
     ],
+    # the system microphone, with the mute slash in red
+    "org.foxglove.mic-mute": [
+        ("ink", '<rect x="9" y="2.5" width="6" height="11" rx="3"/>'),
+        ("ink", '<path d="M5.5 10.5 A6.5 6.5 0 0 0 18.5 10.5 M12 17 V20.5 M8.5 21 H15.5"/>'),
+        ("r", '<path d="M4 3 L20 19"/>'),
+    ],
     # lighting mirrored onto a key: rays over a keycap
     "org.foxglove.icue": [
         ("ink", '<rect x="5" y="10" width="14" height="11" rx="2"/>'),
