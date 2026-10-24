@@ -26,6 +26,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #endif
 
 #include "art_relay.h"
+#if IS_ENABLED(CONFIG_FOXGLOVE_LAMP_STRIP)
+#include "lamp_strip.h"
+#endif
 #include "screen_snap.h"
 #if IS_ENABLED(CONFIG_FOXGLOVE_TEST_HOOKS)
 #include "test_hooks.h"
@@ -115,7 +118,12 @@ static void play(void) {
 }
 
 #if IS_ENABLED(CONFIG_NICE_VIEW_RGB_IDLE)
-static void rgb_disconnected(struct bt_conn *conn, uint8_t reason) { rgb_idle_remote_lost(); }
+static void rgb_disconnected(struct bt_conn *conn, uint8_t reason) {
+    rgb_idle_remote_lost();
+#if IS_ENABLED(CONFIG_FOXGLOVE_LAMP_STRIP)
+    lamp_strip_host(false); // no PC to draw any more: the right's own lights come back
+#endif
+}
 
 BT_CONN_CB_DEFINE(art_relay_rgb_conn_cb) = {
     .disconnected = rgb_disconnected,
@@ -134,6 +142,29 @@ static ssize_t data_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     }
 
     switch (d[0]) {
+    case ART_RELAY_LAMPS:
+#if IS_ENABLED(CONFIG_FOXGLOVE_LAMP_STRIP)
+        if (len < 3 || len != 3 + 3 * d[2]) {
+            return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+        }
+        for (int i = 0; i < d[2]; i++) {
+            lamp_strip_set(d[1] + i, d[3 + 3 * i], d[4 + 3 * i], d[5 + 3 * i]);
+        }
+        lamp_strip_show();
+#endif
+        break;
+
+    case ART_RELAY_LAMP_HOST:
+        if (len != 2) {
+            return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+        }
+#if IS_ENABLED(CONFIG_FOXGLOVE_LAMP_STRIP)
+        lamp_strip_host(d[1] != 0);
+#else
+        return BT_GATT_ERR(0x84);
+#endif
+        break;
+
     case ART_RELAY_BOOT:
 #if IS_ENABLED(CONFIG_FOXGLOVE_TEST_HOOKS)
         if (len != 5 || memcmp(&d[1], "BOOT", 4) != 0) {

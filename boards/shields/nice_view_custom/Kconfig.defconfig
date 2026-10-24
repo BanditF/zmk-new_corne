@@ -77,6 +77,31 @@ config FOXGLOVE_TEST_HOOKS
       Pre-GA test hooks for injecting key positions through the real keymap and split link.
       The GA build turns this off.
 
+config FOXGLOVE_LAMP_STRIP
+    bool "Let the PC drive this half's underglow (for the HID LampArray, #88)"
+    default y if NICE_VIEW_RGB_IDLE && NICE_VIEW_ART_RELAY && ZMK_SPLIT && !ZMK_SPLIT_ROLE_CENTRAL
+    default y if FOXGLOVE_LAMPARRAY
+    depends on NICE_VIEW_RGB_IDLE
+
+config FOXGLOVE_LAMPARRAY
+    bool "HID LampArray on USB for Windows Dynamic Lighting (prototype, #88)"
+    depends on USB_DEVICE_HID && NICE_VIEW_RGB_IDLE && (!ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL)
+    help
+      Needs one more USB HID device: raise USB_HID_DEVICE_COUNT by one.
+
+config FOXGLOVE_LAMPARRAY_BLE
+    bool "Also offer the LampArray over Bluetooth (HID over GATT, prototype, #88)"
+    depends on FOXGLOVE_LAMPARRAY && ZMK_BLE
+    help
+      A second HID service on the left with the same six feature reports. Whether Windows
+      Dynamic Lighting takes a LampArray over Bluetooth is unverified; dev builds only until the
+      #115 sitting says so. Adding a GATT service can make a bonded PC need pairing again.
+
+config FOXGLOVE_LAMPARRAY_DEVICE
+    string "USB HID device for the LampArray"
+    default "HID_2"
+    depends on FOXGLOVE_LAMPARRAY
+
 config NICE_VIEW_HOST_LINK
     bool "PC-driven host panel on the left screen (Raw HID)"
     default y if RAW_HID

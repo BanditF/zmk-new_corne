@@ -30,5 +30,8 @@ void rgb_idle_set_sync(bool sync);
 // Right: the left's underglow state, from the art relay link. follow = false hands the right its
 // own idle auto-off back.
 void rgb_idle_remote(bool on, bool follow);
+// Left: the PC drives the LEDs (HID LampArray); idle and sync step aside until it hands back.
+void rgb_idle_host_control(bool on);
+
 // Right: the split link dropped; go by the right's own activity until the left is back.
 void rgb_idle_remote_lost(void);

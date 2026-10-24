@@ -53,6 +53,8 @@ enum art_relay_op {
     ART_RELAY_SNAP = 7, // one byte, write request: take a screen snapshot
     ART_RELAY_SAVE = 9,  // slot u8, name[16]: save the shown pushed set to flash (write request)
     ART_RELAY_ERASE = 10, // slot u8: empty a flash slot (write request)
+    ART_RELAY_LAMPS = 11, // start u8, n u8, n x (r, g, b): host colours (write without response)
+    ART_RELAY_LAMP_HOST = 12, // on u8: the PC drives the right's LEDs (write request)
     ART_RELAY_BOOT = 8, // "BOOT", write request: reboot into the bootloader (test hooks only)
 };
 
@@ -162,4 +164,7 @@ int art_relay_build_info(void);
 void art_relay_press(uint8_t pos, uint8_t state);
 // Asks the right half to reboot into its bootloader; answers test_hooks_boot_relay_done().
 void art_relay_boot(void);
+// LampArray: hands the right's strip to the PC (or back) and sends its colours, if the link is
+// up. Copies rgb; runs on the relay queue.
+void art_relay_lamps(bool host, const uint8_t rgb[][3]);
 #endif

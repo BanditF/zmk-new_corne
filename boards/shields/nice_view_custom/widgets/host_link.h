@@ -133,6 +133,10 @@
  *      3 relay error/timeout (3 s), 4 right firmware without it, 5 bad half. The right's comes
  *      with an offset read of the relay status value (after the slot table); the reply waits.
  *      The version is FIRMWARE_VERSION (SemVer); release tags are fw-vX.Y.Z.
+ *   0A LAMP_TEST  half u8, index u8 (0xff = end), r, g, b    reply: D7 8A, status, half, index
+ *      Test hooks + LampArray builds only (#115): lights lamp index of that half alone, so a person
+ *      can name the key above it; index 0xff gives the half its own lights back. The right's goes
+ *      over the art relay. Status: 0 ok, 2 no relay link, 4 not built in, 5 bad request.
  *   08 BOOTLOADER (test hooks only), two steps so one stray report can't enter a bootloader:
  *      ARM      request D7 08 00                  reply D7 88, status, nonce u32 LE
  *      TRIGGER  request D7 08 01 half nonce u32   reply D7 88, status, half

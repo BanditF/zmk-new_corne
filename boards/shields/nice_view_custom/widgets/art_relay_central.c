@@ -34,6 +34,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include "art_relay.h"
 #include "half_marker.h"
 #include "host_link.h"
+#if IS_ENABLED(CONFIG_FOXGLOVE_LAMPARRAY)
+#include "lamp_strip.h"
+#endif
 #include "screen_snap.h"
 #if IS_ENABLED(CONFIG_FOXGLOVE_TEST_HOOKS)
 #include "test_hooks.h"
@@ -428,6 +431,50 @@ static void boot_cb(struct k_work *work) {
 }
 static K_WORK_DEFINE(boot_work, boot_cb);
 void art_relay_boot(void) { k_work_submit_to_queue(&relay_q, &boot_work); }
+#endif
+
+#if IS_ENABLED(CONFIG_FOXGLOVE_LAMPARRAY)
+// LampArray colours for the right's strip (lamparray.c).
+static uint8_t lamps_rgb[LAMP_STRIP_LEN][3];
+static atomic_t lamps_host;
+static int8_t lamps_host_sent = -1; // last LAMP_HOST the right confirmed, -1 = unknown
+
+static void lamps_cb(struct k_work *work) {
+    struct bt_conn *conn = job_conn();
+    if (conn == NULL) {
+        lamps_host_sent = -1; // a new link starts over
+        return;
+    }
+    bool host = atomic_get(&lamps_host);
+    if (host != lamps_host_sent) {
+        uint8_t op[] = {ART_RELAY_LAMP_HOST, host};
+        if (write_req(conn, op, sizeof(op)) == 0) {
+            lamps_host_sent = host;
+        }
+    }
+    if (host && lamps_host_sent == 1) {
+        uint8_t buf[3 + 3 * LAMP_STRIP_LEN];
+        int per = CLAMP(((int)bt_gatt_get_mtu(conn) - 3 - 3) / 3, 1, LAMP_STRIP_LEN);
+        for (int start = 0; start < LAMP_STRIP_LEN; start += per) {
+            int n = MIN(per, LAMP_STRIP_LEN - start);
+            buf[0] = ART_RELAY_LAMPS;
+            buf[1] = start;
+            buf[2] = n;
+            memcpy(&buf[3], lamps_rgb[start], 3 * n);
+            if (write_cmd(conn, buf, 3 + 3 * n)) {
+                break; // the next frame tries again
+            }
+        }
+    }
+    bt_conn_unref(conn);
+}
+static K_WORK_DEFINE(lamps_work, lamps_cb);
+
+void art_relay_lamps(bool host, const uint8_t rgb[][3]) {
+    memcpy(lamps_rgb, rgb, sizeof(lamps_rgb));
+    atomic_set(&lamps_host, host);
+    k_work_submit_to_queue(&relay_q, &lamps_work);
+}
 #endif
 
 static int push(struct bt_conn *conn) {
