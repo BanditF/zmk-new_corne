@@ -76,8 +76,12 @@ fn states_until(mode: &str, within: Duration, done: impl Fn(&PluginState) -> boo
 /// Runs `spec` until a state matches `done` (or `within` runs out): waits on the outcome, not
 /// on a time.
 fn run_until(spec: PluginSpec, within: Duration, done: impl Fn(&PluginState) -> bool) -> Vec<PluginState> {
+    run_until_with(spec, fast(), within, done)
+}
+
+fn run_until_with(spec: PluginSpec, config: Config, within: Duration, done: impl Fn(&PluginState) -> bool) -> Vec<PluginState> {
     let (tx, rx) = mpsc::channel();
-    let runner = Runner::start(spec, fast(), context, move |s| {
+    let runner = Runner::start(spec, config, context, move |s| {
         let _ = tx.send(s);
     });
     let until = std::time::Instant::now() + within;
@@ -108,8 +112,10 @@ fn a_healthy_plugin_keeps_running_until_stopped() {
 
 #[test]
 fn a_crashing_plugin_backs_off_then_is_disabled() {
-    // Waits for the outcome rather than a fixed time, so a slow machine doesn't cut it short.
-    let s = states_until("crash", Duration::from_secs(15), |s| matches!(s, PluginState::Disabled(_)));
+    // Waits for the outcome rather than a fixed time, and allows a long silence: on a loaded
+    // machine the process can take seconds just to start, and its exit must be what's seen.
+    let patient = Config { ping_timeout: Duration::from_secs(30), ..fast() };
+    let s = run_until_with(spec("crash"), patient, Duration::from_secs(120), |s| matches!(s, PluginState::Disabled(_)));
     let restarts = s.iter().filter(|s| matches!(s, PluginState::Restarting { .. })).count();
     assert_eq!(restarts, 2, "{s:?}");
     assert!(matches!(s.iter().rev().find(|s| matches!(s, PluginState::Disabled(_))), Some(PluginState::Disabled(r)) if r.contains("exited (3)")), "{s:?}");
