@@ -94,6 +94,49 @@ fn colour(plugin: &Plugin, devices: &[(String, Option<LightingState>)], color: H
         let set = SetLightingParams { device: id.clone(), on, color: Some(color), effect: effect.clone() };
         if let Err(e) = plugin.set_lighting(&set) {
             eprintln!("openrgb-e131: lighting: {e}");
+            continue;
+        }
+        let all = SetLightingParams { device: id.clone(), on: Some(color.brightness > 0), color: Some(color), effect: Some("0".into()) };
+        confirm(plugin, &all);
+    }
+}
+
+/// How often a colour the keyboard didn't take is sent again.
+const RESENDS: u32 = 3;
+
+/// Whether the keyboard shows what `set` asked for: on or off, and the hue and saturation
+/// (brightness aside: the keyboard may dim on battery).
+fn shows(state: &LightingState, set: &SetLightingParams) -> bool {
+    let near = |a: u16, b: u16, wrap: u16| {
+        let d = a.abs_diff(b);
+        d.min(wrap.saturating_sub(d)) <= 2
+    };
+    set.on.is_none_or(|on| state.on == on)
+        && (!state.on
+            || set.color.is_none_or(|c| near(state.hue, c.hue, 360) && near(state.saturation.into(), c.saturation.into(), 1000)))
+}
+
+/// Reads the lights back after a change and sends the whole colour again (on, colour, static
+/// effect) if the keyboard didn't take it, a few times at most: a write can be lost while the
+/// keyboard is busy with the previous one, and it wouldn't be retried otherwise, since only
+/// changes are sent.
+fn confirm(plugin: &Plugin, all: &SetLightingParams) {
+    let id = &all.device;
+    for attempt in 0..=RESENDS {
+        match plugin.lighting_state(id) {
+            Ok(state) if shows(&state, all) => return,
+            Ok(_) if attempt < RESENDS => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if let Err(e) = plugin.set_lighting(all) {
+                    eprintln!("openrgb-e131: lighting: {e}");
+                    return;
+                }
+            }
+            Ok(state) => {
+                eprintln!("openrgb-e131: {id} still shows {state:?} after {RESENDS} resends");
+                return;
+            }
+            Err(_) => return, // can't read it back; the write itself succeeded
         }
     }
 }
@@ -107,8 +150,9 @@ fn restore(plugin: &Plugin, devices: &[(String, Option<LightingState>)]) {
             color: Some(Hsb { hue: s.hue, saturation: s.saturation, brightness: s.brightness }),
             effect: Some(s.effect.clone()),
         };
-        if let Err(e) = plugin.set_lighting(&set) {
-            eprintln!("openrgb-e131: restoring lights: {e}");
+        match plugin.set_lighting(&set) {
+            Ok(()) => confirm(plugin, &set),
+            Err(e) => eprintln!("openrgb-e131: restoring lights: {e}"),
         }
     }
 }
@@ -164,6 +208,10 @@ fn main() {
     let mut next_send = Instant::now();
     let mut next_check = Instant::now() + Duration::from_secs(10);
     loop {
+        // Foxglove gone (stopped, or killed): don't linger.
+        if plugin.is_closed() {
+            return;
+        }
         let mut stop = false;
         let received = match frames.recv_timeout(Duration::from_millis(250)) {
             Ok(NetEvent::Data(bytes, from)) => Some((bytes, from.unwrap_or_default())),

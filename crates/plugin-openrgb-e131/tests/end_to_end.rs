@@ -11,10 +11,22 @@ use foxglove_plugin_api::permission::Permission;
 use foxglove_plugin_api::rpc::Error;
 use serde_json::{json, Value};
 
-/// One keyboard with lights; records every `lighting.set`.
-#[derive(Default)]
+/// One keyboard with lights: it records every `lighting.set`, keeps its state, and can lose
+/// writes (`drop`), as a busy keyboard sometimes does.
 struct Keyboard {
     sets: Mutex<Vec<Value>>,
+    state: Mutex<Value>,
+    drop: std::sync::atomic::AtomicUsize,
+}
+
+impl Default for Keyboard {
+    fn default() -> Self {
+        Keyboard {
+            sets: Mutex::default(),
+            state: Mutex::new(json!({"on": true, "hue": 200, "saturation": 50, "brightness": 40, "effect": "3", "speed": 1})),
+            drop: Default::default(),
+        }
+    }
 }
 
 impl Devices for Keyboard {
@@ -22,11 +34,24 @@ impl Devices for Keyboard {
         match method {
             "devices.list" => Ok(json!({"devices": [{"id": "kb", "name": "Test board", "kind": "keyboard",
                 "backend": "mock", "connected": true, "caps": ["lighting"]}]})),
-            "lighting.state" => {
-                Ok(json!({"on": true, "hue": 200, "saturation": 50, "brightness": 40, "effect": "3", "speed": 1}))
-            }
+            "lighting.state" => Ok(self.state.lock().unwrap().clone()),
             "lighting.set" => {
-                self.sets.lock().unwrap().push(params);
+                self.sets.lock().unwrap().push(params.clone());
+                let lost = self.drop.try_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |n| n.checked_sub(1)).is_ok();
+                if !lost {
+                    let mut state = self.state.lock().unwrap();
+                    if let Some(on) = params.get("on").filter(|v| !v.is_null()) {
+                        state["on"] = on.clone();
+                    }
+                    if let Some(c) = params.get("color").filter(|v| !v.is_null()) {
+                        state["hue"] = c["hue"].clone();
+                        state["saturation"] = c["saturation"].clone();
+                        state["brightness"] = c["brightness"].clone();
+                    }
+                    if let Some(e) = params.get("effect").filter(|v| !v.is_null()) {
+                        state["effect"] = e.clone();
+                    }
+                }
                 Ok(json!({}))
             }
             _ => Err(Error { code: -32601, message: method.into(), data: None }),
@@ -104,6 +129,20 @@ fn a_frame_colours_the_keyboard_and_the_sender_stopping_restores_it() {
         Some(&json!({"device": "kb", "on": true, "color": {"hue": 200, "saturation": 50, "brightness": 40}, "effect": "3"})),
         "{sets:?}"
     );
+    // A new takeover whose first write the keyboard loses: the plugin reads the lights back and
+    // sends the colour again, so the keyboard ends up green.
+    keyboard.drop.store(1, std::sync::atomic::Ordering::Relaxed);
+    let until = Instant::now() + Duration::from_secs(30);
+    let mut green = seq + 3;
+    while keyboard.state.lock().unwrap()["hue"] != json!(120) {
+        assert!(Instant::now() < until, "never green: {:?}", keyboard.sets.lock().unwrap());
+        send(green, 0, 255, 0, false);
+        green = green.wrapping_add(1);
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    let sets = keyboard.sets.lock().unwrap().clone();
+    let full_green = json!({"device": "kb", "on": true, "color": {"hue": 120, "saturation": 100, "brightness": 100}, "effect": "0"});
+    assert!(sets.iter().filter(|s| **s == full_green).count() >= 2, "the lost write was sent again: {sets:?}");
     drop(runner);
     #[cfg(windows)]
     foxglove_plugin_host::delete_container("test.openrgb-e131");
