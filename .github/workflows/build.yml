@@ -51,6 +51,7 @@ jobs:
               eyelash_corne_studio_left_ga.uf2) name=left-ga ;;
               nice_view_custom-eyelash_corne_right-zmk.uf2) name=right-dev ;;
               eyelash_corne_right_ga.uf2) name=right-ga ;;
+              eyelash_corne_studio_left_lamparray.uf2) name=left-lamparray ;;
               settings_reset-nice_nano_v2-zmk.uf2) name=settings-reset ;;
               *) name=$(basename "$f" .uf2) ;;
             esac

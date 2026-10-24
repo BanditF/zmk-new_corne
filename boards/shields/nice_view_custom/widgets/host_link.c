@@ -31,6 +31,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include "half_marker.h"
 #include "host_link.h"
+#if IS_ENABLED(CONFIG_FOXGLOVE_LAMPARRAY)
+#include "lamp_strip.h"
+#endif
 #include "screen_snap.h"
 #include "art_relay.h"
 #include "rgb_idle.h"
@@ -47,7 +50,7 @@ enum { PANEL_HELLO = 0x01, PANEL_FILL, PANEL_ROWS, PANEL_PRESENT, PANEL_RELEASE 
 enum { ART_BEGIN = 0x01, ART_DATA, ART_COMMIT, ART_SELECT, ART_STATUS, ART_SAVE, ART_SLOT, ART_ERASE };
 enum { SETTING_RGB_SYNC = 0x01, SETTING_INVOKE, SETTING_RGB_STATE, SETTING_CONN_STATE, SETTING_POSITION,
        SETTING_SCREEN_SNAP, SETTING_SCREEN_READ, SETTING_BOOTLOADER,
-       SETTING_BUILD_INFO };
+       SETTING_BUILD_INFO, SETTING_LAMP_TEST };
 enum {
     INVOKE_OK, INVOKE_UNKNOWN, INVOKE_BUSY, INVOKE_FAILED, INVOKE_UNSUPPORTED,
     INVOKE_BAD_LENGTH, INVOKE_REFUSED
@@ -460,12 +463,55 @@ void host_link_rgb_changed(void) {
     }
 }
 
+#if IS_ENABLED(CONFIG_FOXGLOVE_TEST_HOOKS) && IS_ENABLED(CONFIG_FOXGLOVE_LAMPARRAY)
+// D7 0A LAMP_TEST: one lamp lit, so a person can name the key above it (#115).
+static uint8_t lamp_test(const uint8_t *d, int len) {
+    static uint8_t right_rgb[LAMP_STRIP_LEN][3];
+    if (len < 4 || d[2] > 1) {
+        return 5;
+    }
+    uint8_t half = d[2], index = d[3];
+    bool on = index != 0xff;
+    if (on && (index >= LAMP_STRIP_LEN || len < 7)) {
+        return 5;
+    }
+    if (half == 0) {
+        for (int i = 0; i < LAMP_STRIP_LEN; i++) {
+            lamp_strip_set(i, 0, 0, 0);
+        }
+        if (on) {
+            lamp_strip_set(index, d[4], d[5], d[6]);
+        }
+        lamp_strip_host(on);
+        lamp_strip_show();
+        return 0;
+    }
+    if (art_relay_link() != 2) {
+        return 2;
+    }
+    memset(right_rgb, 0, sizeof(right_rgb));
+    if (on) {
+        memcpy(right_rgb[index], &d[4], 3);
+    }
+    art_relay_lamps(on, right_rgb);
+    return 0;
+}
+#endif
+
 static void settings_command(const uint8_t *d, int len) {
     if (d[1] == SETTING_SCREEN_SNAP || d[1] == SETTING_SCREEN_READ) {
         screen_snap_command(d, len);
         return;
     }
     switch (d[1]) {
+    case SETTING_LAMP_TEST: {
+        uint8_t r[5] = {HOST_LINK_SETTINGS, 0x80 | SETTING_LAMP_TEST, 4, d[2], d[3]};
+#if IS_ENABLED(CONFIG_FOXGLOVE_TEST_HOOKS) && IS_ENABLED(CONFIG_FOXGLOVE_LAMPARRAY)
+        r[2] = lamp_test(d, len);
+#endif
+        reply(r, sizeof(r));
+        break;
+    }
     case SETTING_BUILD_INFO: {
         uint8_t half = len >= 3 ? d[2] : 0;
         if (half == 0) {
