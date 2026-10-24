@@ -499,12 +499,15 @@ impl<'a, D: Device> Runner<'a, D> {
                 // FOXGLOVE_CONFIG_DIR. The user's real settings are never written.
                 let Some(dir) = std::env::var_os("FOXGLOVE_CONFIG_DIR") else {
                     return Err(Blocked(
-                        "screens_setting needs FOXGLOVE_CONFIG_DIR (a temp folder the app under                          test also uses); the user's real settings are never changed"
+                        "screens_setting needs FOXGLOVE_CONFIG_DIR (a temp folder the app under \
+                         test also uses); the user's real settings are never changed"
                             .into(),
                     )
                     .into());
                 };
-                let path = PathBuf::from(dir).join("screens.ini");
+                // Foxglove's settings store (#196): foxglove.toml inside FOXGLOVE_CONFIG_DIR. The
+                // screens service follows its [screens] table live.
+                let path = PathBuf::from(dir).join("foxglove.toml");
                 let current = std::fs::read(&path).ok();
                 if self.screens_ini.is_none() {
                     self.screens_ini = Some((path.clone(), current.clone()));
@@ -512,9 +515,9 @@ impl<'a, D: Device> Runner<'a, D> {
                 let text = String::from_utf8_lossy(current.as_deref().unwrap_or_default());
                 std::fs::write(
                     &path,
-                    crate::host::set_ini(&text, "screens", &s.key, &s.value),
+                    crate::host::set_store_screens(&text, &s.key, &s.value)?,
                 )?;
-                Ok(format!("screens.ini {}={}", s.key, s.value))
+                Ok(format!("foxglove.toml [screens] {}={}", s.key, s.value))
             }
             Step::PanelDump(d) => {
                 let end = Instant::now() + Duration::from_millis(d.within_ms);

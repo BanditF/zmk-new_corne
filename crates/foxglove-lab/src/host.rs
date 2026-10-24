@@ -189,6 +189,37 @@ pub fn expand_env(text: &str) -> String {
     out
 }
 
+/// Sets `[screens] key = value` in Foxglove's settings store (foxglove.toml), typed as the app
+/// reads it: drive_left a bool, fps an integer, layout a string. Other tables stay as they were.
+pub fn set_store_screens(text: &str, key: &str, value: &str) -> Result<String> {
+    let mut doc: toml::Table = if text.trim().is_empty() {
+        toml::Table::new()
+    } else {
+        text.parse().context("foxglove.toml isn't valid TOML")?
+    };
+    doc.entry("schema").or_insert(toml::Value::Integer(1));
+    let typed = match key {
+        "drive_left" => toml::Value::Boolean(value.parse().context("drive_left is true or false")?),
+        "fps" => toml::Value::Integer(value.parse().context("fps is a number")?),
+        "layout" => {
+            ensure!(
+                value == "info" || value == "wallpaper",
+                "layout is info or wallpaper"
+            );
+            toml::Value::String(value.into())
+        }
+        other => anyhow::bail!("unsupported [screens] key {other}"),
+    };
+    let screens = doc
+        .entry("screens")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(screens) = screens else {
+        anyhow::bail!("[screens] in foxglove.toml isn't a table");
+    };
+    screens.insert(key.into(), typed);
+    Ok(toml::to_string(&doc)?)
+}
+
 /// Sets `key=value` in `[section]` of an INI text, adding the section or key when missing and
 /// keeping everything else as it was.
 pub fn set_ini(text: &str, section: &str, key: &str, value: &str) -> String {
@@ -266,6 +297,26 @@ mod tests {
             verdicts(&[entry(RUNNING, LEFT_SERIAL, "Error", 0)]),
             [Verdict::Fail, Verdict::Info]
         );
+    }
+
+    #[test]
+    fn store_screens_are_typed_and_other_tables_kept() {
+        let toml = "schema = 1\n\n[profiles.list.Game]\n\n[screens]\nfps = 4\n";
+        let out: toml::Table = set_store_screens(toml, "layout", "wallpaper")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(out["screens"]["layout"].as_str(), Some("wallpaper"));
+        assert_eq!(out["screens"]["fps"].as_integer(), Some(4));
+        assert!(out["profiles"]["list"].get("Game").is_some());
+        let out: toml::Table = set_store_screens("", "drive_left", "false")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(out["schema"].as_integer(), Some(1));
+        assert_eq!(out["screens"]["drive_left"].as_bool(), Some(false));
+        assert!(set_store_screens("", "layout", "sideways").is_err());
+        assert!(set_store_screens("", "fps", "fast").is_err());
     }
 
     #[test]

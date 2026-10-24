@@ -158,8 +158,8 @@ pub struct PanelDump {
     #[serde(default = "art_timeout")]
     pub within_ms: u64,
 }
-/// Sets one key in the app's screens.ini ([screens] section), which the app watches. The
-/// original file is put back at the end of the case.
+/// Sets one key of the [screens] table in the app's foxglove.toml (inside FOXGLOVE_CONFIG_DIR),
+/// which the screens service follows live. The original file is put back at the end of the case.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScreensSetting {
@@ -336,8 +336,8 @@ impl Step {
                 ensure!(!d.path.is_empty(), "panel_dump needs the dump path");
             }
             Self::ScreensSetting(s) => ensure!(
-                ["drive_left", "fps"].contains(&s.key.as_str()) && !s.value.contains(['\n', '\r']),
-                "screens_setting supports drive_left and fps"
+                ["drive_left", "fps", "layout"].contains(&s.key.as_str()),
+                "screens_setting supports drive_left, fps and layout"
             ),
             Self::IdleCpu(i) => {
                 ensure!(

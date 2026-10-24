@@ -3,8 +3,8 @@ schema = 1
 # The app's left panel against the keyboard's screen readback. Start Foxglove AND the runner with
 # the same FOXGLOVE_CONFIG_DIR (a temp folder; the user's real settings are never touched; copy a
 # keymap-*.studio into it so behavior ids resolve), and start Foxglove with
-# FOXGLOVE_DUMP_PANEL=%TEMP%/foxglove-panel.pbm. Run with --allow-app. screens.ini changes are put
-# back after each case.
+# FOXGLOVE_DUMP_PANEL=%TEMP%/foxglove-panel.pbm. Run with --allow-app. Settings changes go to
+# foxglove.toml [screens] in that folder (the app follows it live) and are put back after each case.
 
 [[cases]]
 name = "panel-matches-app-frame"
